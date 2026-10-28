@@ -37,7 +37,7 @@ def choose_csv_file():
         return None
 
 
-def inspect_csv(csv_path):
+def profile_csv(csv_path):
     try:
         with csv_path.open("r", encoding="utf-8-sig", newline="") as file:
             reader = csv.reader(file)
@@ -48,33 +48,51 @@ def inspect_csv(csv_path):
                 print("The CSV file is empty.")
                 return
 
-            row_count = sum(1 for _ in reader)
+            column_stats = [
+                {"non_empty": 0, "unique_values": set()}
+                for _ in columns
+            ]
+
+            row_count = 0
+
+            for row in reader:
+                row_count += 1
+
+                for index, value in enumerate(row[:len(columns)]):
+                    cleaned_value = value.strip()
+
+                    if cleaned_value:
+                        column_stats[index]["non_empty"] += 1
+                        column_stats[index]["unique_values"].add(cleaned_value)
 
     except (OSError, UnicodeError, csv.Error) as error:
         print(f"Could not read the CSV file: {error}")
         return
 
-    print(f"\nFile: {csv_path.name}")
+    print(f"\nCSV profile: {csv_path.name}")
+    print(f"Rows: {row_count}")
     print(f"Columns: {len(columns)}")
 
-    if columns:
-        print("Column names:")
-        for number, column in enumerate(columns, start=1):
-            print(f"  {number}. {column}")
-    else:
-        print("The header row is empty.")
+    print("\nColumn details:")
+    for index, column in enumerate(columns):
+        display_name = column.strip() or f"(unnamed column {index + 1})"
+        stats = column_stats[index]
 
-    print(f"Data rows: {row_count}")
+        print(
+            f"- {display_name}: "
+            f"{stats['non_empty']} non-empty value(s), "
+            f"{len(stats['unique_values'])} distinct value(s)"
+        )
 
 
 def main():
     print("--- DataCheck ---")
-    print("Inspect a CSV file's columns and row count.\n")
+    print("Profile a CSV file.\n")
 
     csv_path = choose_csv_file()
 
     if csv_path:
-        inspect_csv(csv_path)
+        profile_csv(csv_path)
 
 
 if __name__ == "__main__":

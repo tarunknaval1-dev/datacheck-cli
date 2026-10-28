@@ -11,6 +11,10 @@ DataCheck is a Python command-line project for checking CSV data quality.
 
 - Display CSV column names and data row count
 
+## Day 3
+
+- Show non-empty and distinct value counts for each column
+
 ## Run the app
 
 Requires Python 3.
