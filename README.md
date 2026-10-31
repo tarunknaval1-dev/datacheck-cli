@@ -23,6 +23,10 @@ DataCheck is a Python command-line project for checking CSV data quality.
 
 - Detect repeated duplicate rows and show their row numbers
 
+## Day 6
+
+- Detect leading or trailing whitespace in values
+
 ## Run the app
 
 Requires Python 3.

@@ -48,7 +48,13 @@ def profile_csv(csv_path):
                 return
 
             column_stats = [
-                {"non_empty": 0, "missing": 0, "unique_values": set()}
+                {
+                    "non_empty": 0,
+                    "missing": 0,
+                    "unique_values": set(),
+                    "whitespace_count": 0,
+                    "whitespace_examples": []
+                }
                 for _ in columns
             ]
 
@@ -64,13 +70,22 @@ def profile_csv(csv_path):
                 row_count += 1
 
                 for index in range(len(columns)):
-                    value = row[index].strip() if index < len(row) else ""
+                    value = row[index] if index < len(row) else ""
+                    cleaned_value = value.strip()
+                    stats = column_stats[index]
 
-                    if value:
-                        column_stats[index]["non_empty"] += 1
-                        column_stats[index]["unique_values"].add(value)
+                    if value != cleaned_value:
+                        stats["whitespace_count"] += 1
+                        if len(stats["whitespace_examples"]) < 3:
+                            stats["whitespace_examples"].append(
+                                (row_number, value)
+                            )
+
+                    if cleaned_value:
+                        stats["non_empty"] += 1
+                        stats["unique_values"].add(cleaned_value)
                     else:
-                        column_stats[index]["missing"] += 1
+                        stats["missing"] += 1
 
                 normalized_row = tuple(value.strip() for value in row)
 
@@ -103,8 +118,12 @@ def profile_csv(csv_path):
             f"- {display_name}: "
             f"{stats['non_empty']} non-empty, "
             f"{stats['missing']} missing ({missing_percent:.1f}%), "
-            f"{len(stats['unique_values'])} distinct"
+            f"{len(stats['unique_values'])} distinct, "
+            f"{stats['whitespace_count']} whitespace issue(s)"
         )
+
+        for row_number, original_value in stats["whitespace_examples"]:
+            print(f"    Row {row_number}: {original_value!r}")
 
     print(f"\nDuplicate rows: {len(duplicate_examples)}")
 
