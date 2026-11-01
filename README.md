@@ -27,6 +27,10 @@ DataCheck is a Python command-line project for checking CSV data quality.
 
 - Detect leading or trailing whitespace in values
 
+## Day 7
+
+- Estimate whether each column contains text, numbers, dates, mixed values, or no values
+
 ## Run the app
 
 Requires Python 3.
