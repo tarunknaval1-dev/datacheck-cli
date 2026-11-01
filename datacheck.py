@@ -1,5 +1,9 @@
 import csv
+from datetime import date, datetime
 from pathlib import Path
+
+
+DATE_FORMATS = ("%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d")
 
 
 def choose_csv_file():
@@ -34,6 +38,46 @@ def choose_csv_file():
     except OSError as error:
         print(f"Could not access that file: {error}")
         return None
+
+
+def infer_column_type(values):
+    """Estimate a column type from its non-empty values."""
+    if not values:
+        return "empty"
+
+    detected_types = set()
+
+    for value in values:
+        try:
+            float(value)
+            detected_types.add("number")
+            continue
+        except ValueError:
+            pass
+
+        is_date = False
+
+        try:
+            date.fromisoformat(value)
+            is_date = True
+        except ValueError:
+            for date_format in DATE_FORMATS:
+                try:
+                    datetime.strptime(value, date_format)
+                    is_date = True
+                    break
+                except ValueError:
+                    continue
+
+        if is_date:
+            detected_types.add("date")
+        else:
+            detected_types.add("text")
+
+    if len(detected_types) == 1:
+        return detected_types.pop()
+
+    return "mixed"
 
 
 def profile_csv(csv_path):
@@ -105,17 +149,18 @@ def profile_csv(csv_path):
     print(f"Columns: {len(columns)}")
 
     print("\nColumn details:")
+
     for index, column in enumerate(columns):
         display_name = column.strip() or f"(unnamed column {index + 1})"
         stats = column_stats[index]
-
-        if row_count:
-            missing_percent = stats["missing"] / row_count * 100
-        else:
-            missing_percent = 0
+        missing_percent = (
+            stats["missing"] / row_count * 100 if row_count else 0
+        )
+        estimated_type = infer_column_type(stats["unique_values"])
 
         print(
             f"- {display_name}: "
+            f"type={estimated_type}, "
             f"{stats['non_empty']} non-empty, "
             f"{stats['missing']} missing ({missing_percent:.1f}%), "
             f"{len(stats['unique_values'])} distinct, "
@@ -123,7 +168,7 @@ def profile_csv(csv_path):
         )
 
         for row_number, original_value in stats["whitespace_examples"]:
-            print(f"    Row {row_number}: {original_value!r}")
+            print(f"    Whitespace at row {row_number}: {original_value!r}")
 
     print(f"\nDuplicate rows: {len(duplicate_examples)}")
 
