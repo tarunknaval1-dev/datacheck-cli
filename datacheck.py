@@ -40,42 +40,36 @@ def choose_csv_file():
         return None
 
 
-def infer_column_type(values):
-    """Estimate a column type from its non-empty values."""
-    if not values:
+def classify_value(value):
+    """Classify a non-empty value as a number, date, or text."""
+    try:
+        float(value)
+        return "number"
+    except ValueError:
+        pass
+
+    try:
+        date.fromisoformat(value)
+        return "date"
+    except ValueError:
+        pass
+
+    for date_format in DATE_FORMATS:
+        try:
+            datetime.strptime(value, date_format)
+            return "date"
+        except ValueError:
+            continue
+
+    return "text"
+
+
+def infer_column_type(value_types):
+    if not value_types:
         return "empty"
 
-    detected_types = set()
-
-    for value in values:
-        try:
-            float(value)
-            detected_types.add("number")
-            continue
-        except ValueError:
-            pass
-
-        is_date = False
-
-        try:
-            date.fromisoformat(value)
-            is_date = True
-        except ValueError:
-            for date_format in DATE_FORMATS:
-                try:
-                    datetime.strptime(value, date_format)
-                    is_date = True
-                    break
-                except ValueError:
-                    continue
-
-        if is_date:
-            detected_types.add("date")
-        else:
-            detected_types.add("text")
-
-    if len(detected_types) == 1:
-        return detected_types.pop()
+    if len(value_types) == 1:
+        return next(iter(value_types))
 
     return "mixed"
 
@@ -97,7 +91,10 @@ def profile_csv(csv_path):
                     "missing": 0,
                     "unique_values": set(),
                     "whitespace_count": 0,
-                    "whitespace_examples": []
+                    "whitespace_examples": [],
+                    "value_types": set(),
+                    "text_count": 0,
+                    "text_examples": []
                 }
                 for _ in columns
             ]
@@ -128,6 +125,16 @@ def profile_csv(csv_path):
                     if cleaned_value:
                         stats["non_empty"] += 1
                         stats["unique_values"].add(cleaned_value)
+
+                        value_type = classify_value(cleaned_value)
+                        stats["value_types"].add(value_type)
+
+                        if value_type == "text":
+                            stats["text_count"] += 1
+                            if len(stats["text_examples"]) < 5:
+                                stats["text_examples"].append(
+                                    (row_number, cleaned_value)
+                                )
                     else:
                         stats["missing"] += 1
 
@@ -153,10 +160,11 @@ def profile_csv(csv_path):
     for index, column in enumerate(columns):
         display_name = column.strip() or f"(unnamed column {index + 1})"
         stats = column_stats[index]
+
         missing_percent = (
             stats["missing"] / row_count * 100 if row_count else 0
         )
-        estimated_type = infer_column_type(stats["unique_values"])
+        estimated_type = infer_column_type(stats["value_types"])
 
         print(
             f"- {display_name}: "
@@ -169,6 +177,21 @@ def profile_csv(csv_path):
 
         for row_number, original_value in stats["whitespace_examples"]:
             print(f"    Whitespace at row {row_number}: {original_value!r}")
+
+        # Flag text only when the column also contains numbers
+        # and is not a mixture involving dates.
+        value_types = stats["value_types"]
+        if "number" in value_types and "text" in value_types and "date" not in value_types:
+            print(
+                f"    Possible invalid numeric values: "
+                f"{stats['text_count']}"
+            )
+            for row_number, value in stats["text_examples"]:
+                print(f"      Row {row_number}: {value!r}")
+
+            extra_count = stats["text_count"] - len(stats["text_examples"])
+            if extra_count > 0:
+                print(f"      ...and {extra_count} more")
 
     print(f"\nDuplicate rows: {len(duplicate_examples)}")
 
