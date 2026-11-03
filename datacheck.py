@@ -3,7 +3,13 @@ from datetime import date, datetime
 from pathlib import Path
 
 
-DATE_FORMATS = ("%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d")
+DATE_FORMATS = [
+    ("YYYY-MM-DD (example: 2026-11-03)", "%Y-%m-%d"),
+    ("DD/MM/YYYY (example: 03/11/2026)", "%d/%m/%Y"),
+    ("MM/DD/YYYY (example: 11/03/2026)", "%m/%d/%Y"),
+    ("DD-MM-YYYY (example: 03-11-2026)", "%d-%m-%Y"),
+    ("YYYY/MM/DD (example: 2026/11/03)", "%Y/%m/%d"),
+]
 
 
 def choose_csv_file():
@@ -41,7 +47,7 @@ def choose_csv_file():
 
 
 def classify_value(value):
-    """Classify a non-empty value as a number, date, or text."""
+    """Estimate whether a non-empty value is a number, date, or text."""
     try:
         float(value)
         return "number"
@@ -54,7 +60,7 @@ def classify_value(value):
     except ValueError:
         pass
 
-    for date_format in DATE_FORMATS:
+    for _, date_format in DATE_FORMATS:
         try:
             datetime.strptime(value, date_format)
             return "date"
@@ -83,7 +89,7 @@ def profile_csv(csv_path):
                 columns = next(reader)
             except StopIteration:
                 print("The CSV file is empty.")
-                return
+                return None, None
 
             column_stats = [
                 {
@@ -101,6 +107,7 @@ def profile_csv(csv_path):
 
             seen_rows = {}
             duplicate_examples = []
+            data_rows = []
             row_count = 0
 
             for row_number, row in enumerate(reader, start=2):
@@ -109,6 +116,7 @@ def profile_csv(csv_path):
                     continue
 
                 row_count += 1
+                data_rows.append((row_number, row))
 
                 for index in range(len(columns)):
                     value = row[index] if index < len(row) else ""
@@ -149,7 +157,7 @@ def profile_csv(csv_path):
 
     except (OSError, UnicodeError, csv.Error) as error:
         print(f"Could not read the CSV file: {error}")
-        return
+        return None, None
 
     print(f"\nCSV profile: {csv_path.name}")
     print(f"Rows: {row_count}")
@@ -160,7 +168,6 @@ def profile_csv(csv_path):
     for index, column in enumerate(columns):
         display_name = column.strip() or f"(unnamed column {index + 1})"
         stats = column_stats[index]
-
         missing_percent = (
             stats["missing"] / row_count * 100 if row_count else 0
         )
@@ -175,19 +182,17 @@ def profile_csv(csv_path):
             f"{stats['whitespace_count']} whitespace issue(s)"
         )
 
-        for row_number, original_value in stats["whitespace_examples"]:
-            print(f"    Whitespace at row {row_number}: {original_value!r}")
+        for issue_row, original_value in stats["whitespace_examples"]:
+            print(f"    Whitespace at row {issue_row}: {original_value!r}")
 
-        # Flag text only when the column also contains numbers
-        # and is not a mixture involving dates.
         value_types = stats["value_types"]
         if "number" in value_types and "text" in value_types and "date" not in value_types:
             print(
                 f"    Possible invalid numeric values: "
                 f"{stats['text_count']}"
             )
-            for row_number, value in stats["text_examples"]:
-                print(f"      Row {row_number}: {value!r}")
+            for issue_row, value in stats["text_examples"]:
+                print(f"      Row {issue_row}: {value!r}")
 
             extra_count = stats["text_count"] - len(stats["text_examples"])
             if extra_count > 0:
@@ -203,6 +208,78 @@ def profile_csv(csv_path):
         if len(duplicate_examples) > 5:
             print(f"- ...and {len(duplicate_examples) - 5} more")
 
+    return columns, data_rows
+
+
+def validate_date_column(columns, data_rows):
+    if not columns:
+        return
+
+    answer = input("\nWould you like to validate a date column? (y/n): ").strip().lower()
+
+    if answer != "y":
+        return
+
+    print("\nChoose the date column:")
+    for number, column in enumerate(columns, start=1):
+        display_name = column.strip() or f"(unnamed column {number})"
+        print(f"{number}. {display_name}")
+
+    try:
+        column_number = int(input("Enter the column number: "))
+    except ValueError:
+        print("Please enter a number.")
+        return
+
+    if column_number < 1 or column_number > len(columns):
+        print("That column number is not in the CSV.")
+        return
+
+    print("\nChoose the expected date format:")
+    for number, (label, _) in enumerate(DATE_FORMATS, start=1):
+        print(f"{number}. {label}")
+
+    try:
+        format_number = int(input("Enter the format number: "))
+    except ValueError:
+        print("Please enter a number.")
+        return
+
+    if format_number < 1 or format_number > len(DATE_FORMATS):
+        print("That date format number is not available.")
+        return
+
+    date_format = DATE_FORMATS[format_number - 1][1]
+    column_index = column_number - 1
+    column_name = columns[column_index].strip() or f"Column {column_number}"
+
+    checked_count = 0
+    invalid_values = []
+
+    for row_number, row in data_rows:
+        value = row[column_index].strip() if column_index < len(row) else ""
+
+        # Blank values are already counted in the missing-value report.
+        if not value:
+            continue
+
+        checked_count += 1
+
+        try:
+            datetime.strptime(value, date_format)
+        except ValueError:
+            invalid_values.append((row_number, value))
+
+    print(f"\nDate validation for '{column_name}':")
+    print(f"Non-empty values checked: {checked_count}")
+    print(f"Invalid date values: {len(invalid_values)}")
+
+    for row_number, value in invalid_values[:10]:
+        print(f"- Row {row_number}: {value!r}")
+
+    if len(invalid_values) > 10:
+        print(f"- ...and {len(invalid_values) - 10} more")
+
 
 def main():
     print("--- DataCheck ---")
@@ -211,7 +288,8 @@ def main():
     csv_path = choose_csv_file()
 
     if csv_path:
-        profile_csv(csv_path)
+        columns, data_rows = profile_csv(csv_path)
+        validate_date_column(columns, data_rows)
 
 
 if __name__ == "__main__":
