@@ -39,6 +39,10 @@ DataCheck is a Python command-line project for checking CSV data quality.
 
 - Validate date columns against a selected date format
 
+# Day 10
+
+- Check that specified columns exist and contain no blank values
+
 ## Run the app
 
 Requires Python 3.
