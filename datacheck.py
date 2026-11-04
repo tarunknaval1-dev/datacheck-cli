@@ -21,8 +21,6 @@ def choose_csv_file():
 
     csv_path = Path(file_input).expanduser()
 
-    # If a relative path isn't found from the terminal's folder,
-    # also look beside this Python script.
     if not csv_path.is_absolute() and not csv_path.exists():
         csv_path = Path(__file__).parent / csv_path
 
@@ -111,7 +109,6 @@ def profile_csv(csv_path):
             row_count = 0
 
             for row_number, row in enumerate(reader, start=2):
-                # Ignore completely blank lines in the CSV.
                 if not row or all(not value.strip() for value in row):
                     continue
 
@@ -162,15 +159,12 @@ def profile_csv(csv_path):
     print(f"\nCSV profile: {csv_path.name}")
     print(f"Rows: {row_count}")
     print(f"Columns: {len(columns)}")
-
     print("\nColumn details:")
 
     for index, column in enumerate(columns):
         display_name = column.strip() or f"(unnamed column {index + 1})"
         stats = column_stats[index]
-        missing_percent = (
-            stats["missing"] / row_count * 100 if row_count else 0
-        )
+        missing_percent = stats["missing"] / row_count * 100 if row_count else 0
         estimated_type = infer_column_type(stats["value_types"])
 
         print(
@@ -187,10 +181,7 @@ def profile_csv(csv_path):
 
         value_types = stats["value_types"]
         if "number" in value_types and "text" in value_types and "date" not in value_types:
-            print(
-                f"    Possible invalid numeric values: "
-                f"{stats['text_count']}"
-            )
+            print(f"    Possible invalid numeric values: {stats['text_count']}")
             for issue_row, value in stats["text_examples"]:
                 print(f"      Row {issue_row}: {value!r}")
 
@@ -216,7 +207,6 @@ def validate_date_column(columns, data_rows):
         return
 
     answer = input("\nWould you like to validate a date column? (y/n): ").strip().lower()
-
     if answer != "y":
         return
 
@@ -252,19 +242,15 @@ def validate_date_column(columns, data_rows):
     date_format = DATE_FORMATS[format_number - 1][1]
     column_index = column_number - 1
     column_name = columns[column_index].strip() or f"Column {column_number}"
-
     checked_count = 0
     invalid_values = []
 
     for row_number, row in data_rows:
         value = row[column_index].strip() if column_index < len(row) else ""
-
-        # Blank values are already counted in the missing-value report.
         if not value:
             continue
 
         checked_count += 1
-
         try:
             datetime.strptime(value, date_format)
         except ValueError:
@@ -281,6 +267,59 @@ def validate_date_column(columns, data_rows):
         print(f"- ...and {len(invalid_values) - 10} more")
 
 
+def validate_required_columns(columns, data_rows):
+    raw_input = input(
+        "\nEnter required column names separated by commas "
+        "(or press Enter to skip): "
+    ).strip()
+
+    if not raw_input:
+        print("Required-column check skipped.")
+        return
+
+    required_names = [
+        name.strip() for name in raw_input.split(",") if name.strip()
+    ]
+
+    if not required_names:
+        print("No column names were entered.")
+        return
+
+    column_lookup = {}
+    for index, column_name in enumerate(columns):
+        normalized_name = column_name.strip().casefold()
+        if normalized_name:
+            column_lookup.setdefault(normalized_name, index)
+
+    print("\n--- Required Column Check ---")
+
+    for required_name in required_names:
+        normalized_name = required_name.casefold()
+
+        if normalized_name not in column_lookup:
+            print(f"- Column '{required_name}' is missing from the CSV header.")
+            continue
+
+        column_index = column_lookup[normalized_name]
+        missing_rows = []
+
+        for row_number, row in data_rows:
+            value = row[column_index].strip() if column_index < len(row) else ""
+            if not value:
+                missing_rows.append(row_number)
+
+        if missing_rows:
+            shown_rows = ", ".join(str(number) for number in missing_rows[:10])
+            print(
+                f"- Column '{required_name}' exists, but has "
+                f"{len(missing_rows)} missing value(s) in row(s): {shown_rows}"
+            )
+            if len(missing_rows) > 10:
+                print(f"  ...and {len(missing_rows) - 10} more")
+        else:
+            print(f"- Column '{required_name}' exists and has no missing values.")
+
+
 def main():
     print("--- DataCheck ---")
     print("Profile a CSV file and check its data quality.\n")
@@ -289,7 +328,10 @@ def main():
 
     if csv_path:
         columns, data_rows = profile_csv(csv_path)
-        validate_date_column(columns, data_rows)
+
+        if columns is not None:
+            validate_date_column(columns, data_rows)
+            validate_required_columns(columns, data_rows)
 
 
 if __name__ == "__main__":
