@@ -1,4 +1,5 @@
 import csv
+import math
 from datetime import date, datetime
 from pathlib import Path
 
@@ -47,8 +48,8 @@ def choose_csv_file():
 def classify_value(value):
     """Estimate whether a non-empty value is a number, date, or text."""
     try:
-        float(value)
-        return "number"
+        number = float(value)
+        return "number" if math.isfinite(number) else "text"
     except ValueError:
         pass
 
@@ -71,10 +72,8 @@ def classify_value(value):
 def infer_column_type(value_types):
     if not value_types:
         return "empty"
-
     if len(value_types) == 1:
         return next(iter(value_types))
-
     return "mixed"
 
 
@@ -144,7 +143,6 @@ def profile_csv(csv_path):
                         stats["missing"] += 1
 
                 normalized_row = tuple(value.strip() for value in row)
-
                 if normalized_row in seen_rows:
                     duplicate_examples.append(
                         (seen_rows[normalized_row], row_number)
@@ -186,16 +184,14 @@ def profile_csv(csv_path):
                 print(f"      Row {issue_row}: {value!r}")
 
             extra_count = stats["text_count"] - len(stats["text_examples"])
-            if extra_count > 0:
+            if extra_count:
                 print(f"      ...and {extra_count} more")
 
     print(f"\nDuplicate rows: {len(duplicate_examples)}")
-
     if duplicate_examples:
         print("Repeated row examples (first occurrence → repeated occurrence):")
         for first_row, repeated_row in duplicate_examples[:5]:
             print(f"- Row {first_row} → row {repeated_row}")
-
         if len(duplicate_examples) > 5:
             print(f"- ...and {len(duplicate_examples) - 5} more")
 
@@ -212,8 +208,7 @@ def validate_date_column(columns, data_rows):
 
     print("\nChoose the date column:")
     for number, column in enumerate(columns, start=1):
-        display_name = column.strip() or f"(unnamed column {number})"
-        print(f"{number}. {display_name}")
+        print(f"{number}. {column.strip() or f'(unnamed column {number})'}")
 
     try:
         column_number = int(input("Enter the column number: "))
@@ -221,7 +216,7 @@ def validate_date_column(columns, data_rows):
         print("Please enter a number.")
         return
 
-    if column_number < 1 or column_number > len(columns):
+    if not 1 <= column_number <= len(columns):
         print("That column number is not in the CSV.")
         return
 
@@ -235,7 +230,7 @@ def validate_date_column(columns, data_rows):
         print("Please enter a number.")
         return
 
-    if format_number < 1 or format_number > len(DATE_FORMATS):
+    if not 1 <= format_number <= len(DATE_FORMATS):
         print("That date format number is not available.")
         return
 
@@ -259,10 +254,8 @@ def validate_date_column(columns, data_rows):
     print(f"\nDate validation for '{column_name}':")
     print(f"Non-empty values checked: {checked_count}")
     print(f"Invalid date values: {len(invalid_values)}")
-
     for row_number, value in invalid_values[:10]:
         print(f"- Row {row_number}: {value!r}")
-
     if len(invalid_values) > 10:
         print(f"- ...and {len(invalid_values) - 10} more")
 
@@ -277,15 +270,9 @@ def validate_required_columns(columns, data_rows):
         print("Required-column check skipped.")
         return
 
-    required_names = [
-        name.strip() for name in raw_input.split(",") if name.strip()
-    ]
-
-    if not required_names:
-        print("No column names were entered.")
-        return
-
+    required_names = [name.strip() for name in raw_input.split(",") if name.strip()]
     column_lookup = {}
+
     for index, column_name in enumerate(columns):
         normalized_name = column_name.strip().casefold()
         if normalized_name:
@@ -311,8 +298,8 @@ def validate_required_columns(columns, data_rows):
         if missing_rows:
             shown_rows = ", ".join(str(number) for number in missing_rows[:10])
             print(
-                f"- Column '{required_name}' exists, but has "
-                f"{len(missing_rows)} missing value(s) in row(s): {shown_rows}"
+                f"- Column '{required_name}' has {len(missing_rows)} "
+                f"missing value(s) in row(s): {shown_rows}"
             )
             if len(missing_rows) > 10:
                 print(f"  ...and {len(missing_rows) - 10} more")
@@ -320,18 +307,97 @@ def validate_required_columns(columns, data_rows):
             print(f"- Column '{required_name}' exists and has no missing values.")
 
 
+def validate_numeric_range(columns, data_rows):
+    if not columns:
+        return
+
+    answer = input("\nWould you like to check a numeric range? (y/n): ").strip().lower()
+    if answer != "y":
+        return
+
+    print("\nChoose the numeric column:")
+    for number, column in enumerate(columns, start=1):
+        print(f"{number}. {column.strip() or f'(unnamed column {number})'}")
+
+    try:
+        column_number = int(input("Enter the column number: "))
+    except ValueError:
+        print("Please enter a number.")
+        return
+
+    if not 1 <= column_number <= len(columns):
+        print("That column number is not in the CSV.")
+        return
+
+    try:
+        minimum = float(input("Enter the minimum allowed value: "))
+        maximum = float(input("Enter the maximum allowed value: "))
+    except ValueError:
+        print("Please enter valid numeric limits.")
+        return
+
+    if not math.isfinite(minimum) or not math.isfinite(maximum):
+        print("Range limits must be finite numbers.")
+        return
+
+    if minimum > maximum:
+        print("The minimum cannot be greater than the maximum.")
+        return
+
+    column_index = column_number - 1
+    column_name = columns[column_index].strip() or f"Column {column_number}"
+    out_of_range = []
+    invalid_values = []
+    checked_count = 0
+
+    for row_number, row in data_rows:
+        value = row[column_index].strip() if column_index < len(row) else ""
+        if not value:
+            continue
+
+        try:
+            number = float(value)
+            if not math.isfinite(number):
+                raise ValueError
+        except ValueError:
+            invalid_values.append((row_number, value))
+            continue
+
+        checked_count += 1
+        if number < minimum or number > maximum:
+            out_of_range.append((row_number, value))
+
+    print(f"\nNumeric range check for '{column_name}' ({minimum} to {maximum}):")
+    print(f"Valid numbers checked: {checked_count}")
+    print(f"Values outside the range: {len(out_of_range)}")
+    print(f"Non-numeric values skipped: {len(invalid_values)}")
+
+    for row_number, value in out_of_range[:10]:
+        print(f"- Row {row_number}: {value!r} is outside the range")
+    if len(out_of_range) > 10:
+        print(f"- ...and {len(out_of_range) - 10} more")
+
+    for row_number, value in invalid_values[:10]:
+        print(f"- Row {row_number}: {value!r} is not numeric")
+    if len(invalid_values) > 10:
+        print(f"- ...and {len(invalid_values) - 10} more")
+
+
 def main():
     print("--- DataCheck ---")
     print("Profile a CSV file and check its data quality.\n")
 
     csv_path = choose_csv_file()
+    if not csv_path:
+        return
 
-    if csv_path:
-        columns, data_rows = profile_csv(csv_path)
+    columns, data_rows = profile_csv(csv_path)
+    if columns is None:
+        return
 
-        if columns is not None:
-            validate_date_column(columns, data_rows)
-            validate_required_columns(columns, data_rows)
+    validate_date_column(columns, data_rows)
+    validate_required_columns(columns, data_rows)
+    validate_numeric_range(columns, data_rows)
 
 
 if __name__ == "__main__":
