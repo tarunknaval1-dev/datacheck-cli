@@ -1,16 +1,19 @@
 import csv
+import json
 import math
 from datetime import date, datetime
 from pathlib import Path
 
 
 DATE_FORMATS = [
-    ("YYYY-MM-DD (example: 2026-11-03)", "%Y-%m-%d"),
-    ("DD/MM/YYYY (example: 03/11/2026)", "%d/%m/%Y"),
-    ("MM/DD/YYYY (example: 11/03/2026)", "%m/%d/%Y"),
-    ("DD-MM-YYYY (example: 03-11-2026)", "%d-%m-%Y"),
-    ("YYYY/MM/DD (example: 2026/11/03)", "%Y/%m/%d"),
+    ("YYYY-MM-DD", "%Y-%m-%d"),
+    ("DD/MM/YYYY", "%d/%m/%Y"),
+    ("MM/DD/YYYY", "%m/%d/%Y"),
+    ("DD-MM-YYYY", "%d-%m-%Y"),
+    ("YYYY/MM/DD", "%Y/%m/%d"),
 ]
+
+SUPPORTED_DATE_FORMATS = {date_format for _, date_format in DATE_FORMATS}
 
 
 def choose_csv_file():
@@ -22,6 +25,8 @@ def choose_csv_file():
 
     csv_path = Path(file_input).expanduser()
 
+    # If a relative path isn't found from the terminal's folder,
+    # also look beside this Python script.
     if not csv_path.is_absolute() and not csv_path.exists():
         csv_path = Path(__file__).parent / csv_path
 
@@ -49,7 +54,8 @@ def classify_value(value):
     """Estimate whether a non-empty value is a number, date, or text."""
     try:
         number = float(value)
-        return "number" if math.isfinite(number) else "text"
+        if math.isfinite(number):
+            return "number"
     except ValueError:
         pass
 
@@ -72,8 +78,10 @@ def classify_value(value):
 def infer_column_type(value_types):
     if not value_types:
         return "empty"
+
     if len(value_types) == 1:
         return next(iter(value_types))
+
     return "mixed"
 
 
@@ -108,6 +116,7 @@ def profile_csv(csv_path):
             row_count = 0
 
             for row_number, row in enumerate(reader, start=2):
+                # Ignore completely blank lines.
                 if not row or all(not value.strip() for value in row):
                     continue
 
@@ -143,6 +152,7 @@ def profile_csv(csv_path):
                         stats["missing"] += 1
 
                 normalized_row = tuple(value.strip() for value in row)
+
                 if normalized_row in seen_rows:
                     duplicate_examples.append(
                         (seen_rows[normalized_row], row_number)
@@ -178,7 +188,11 @@ def profile_csv(csv_path):
             print(f"    Whitespace at row {issue_row}: {original_value!r}")
 
         value_types = stats["value_types"]
-        if "number" in value_types and "text" in value_types and "date" not in value_types:
+        if (
+            "number" in value_types
+            and "text" in value_types
+            and "date" not in value_types
+        ):
             print(f"    Possible invalid numeric values: {stats['text_count']}")
             for issue_row, value in stats["text_examples"]:
                 print(f"      Row {issue_row}: {value!r}")
@@ -188,199 +202,189 @@ def profile_csv(csv_path):
                 print(f"      ...and {extra_count} more")
 
     print(f"\nDuplicate rows: {len(duplicate_examples)}")
+
     if duplicate_examples:
         print("Repeated row examples (first occurrence → repeated occurrence):")
         for first_row, repeated_row in duplicate_examples[:5]:
             print(f"- Row {first_row} → row {repeated_row}")
+
         if len(duplicate_examples) > 5:
             print(f"- ...and {len(duplicate_examples) - 5} more")
 
     return columns, data_rows
 
 
-def validate_date_column(columns, data_rows):
-    if not columns:
-        return
-
-    answer = input("\nWould you like to validate a date column? (y/n): ").strip().lower()
-    if answer != "y":
-        return
-
-    print("\nChoose the date column:")
-    for number, column in enumerate(columns, start=1):
-        print(f"{number}. {column.strip() or f'(unnamed column {number})'}")
+def load_schema():
+    schema_path = Path(__file__).with_name("schema.json")
 
     try:
-        column_number = int(input("Enter the column number: "))
-    except ValueError:
-        print("Please enter a number.")
-        return
+        with schema_path.open("r", encoding="utf-8") as file:
+            schema = json.load(file)
+    except FileNotFoundError:
+        print("\nschema.json was not found. Schema checks skipped.")
+        return None
+    except (OSError, json.JSONDecodeError) as error:
+        print(f"\nCould not read schema.json: {error}")
+        return None
 
-    if not 1 <= column_number <= len(columns):
-        print("That column number is not in the CSV.")
-        return
+    if not isinstance(schema, dict):
+        print("schema.json must contain a JSON object.")
+        return None
 
-    print("\nChoose the expected date format:")
-    for number, (label, _) in enumerate(DATE_FORMATS, start=1):
-        print(f"{number}. {label}")
-
-    try:
-        format_number = int(input("Enter the format number: "))
-    except ValueError:
-        print("Please enter a number.")
-        return
-
-    if not 1 <= format_number <= len(DATE_FORMATS):
-        print("That date format number is not available.")
-        return
-
-    date_format = DATE_FORMATS[format_number - 1][1]
-    column_index = column_number - 1
-    column_name = columns[column_index].strip() or f"Column {column_number}"
-    checked_count = 0
-    invalid_values = []
-
-    for row_number, row in data_rows:
-        value = row[column_index].strip() if column_index < len(row) else ""
-        if not value:
-            continue
-
-        checked_count += 1
-        try:
-            datetime.strptime(value, date_format)
-        except ValueError:
-            invalid_values.append((row_number, value))
-
-    print(f"\nDate validation for '{column_name}':")
-    print(f"Non-empty values checked: {checked_count}")
-    print(f"Invalid date values: {len(invalid_values)}")
-    for row_number, value in invalid_values[:10]:
-        print(f"- Row {row_number}: {value!r}")
-    if len(invalid_values) > 10:
-        print(f"- ...and {len(invalid_values) - 10} more")
+    return schema
 
 
-def validate_required_columns(columns, data_rows):
-    raw_input = input(
-        "\nEnter required column names separated by commas "
-        "(or press Enter to skip): "
-    ).strip()
-
-    if not raw_input:
-        print("Required-column check skipped.")
-        return
-
-    required_names = [name.strip() for name in raw_input.split(",") if name.strip()]
+def validate_schema(columns, data_rows, schema):
     column_lookup = {}
 
-    for index, column_name in enumerate(columns):
-        normalized_name = column_name.strip().casefold()
-        if normalized_name:
-            column_lookup.setdefault(normalized_name, index)
+    for index, name in enumerate(columns):
+        cleaned_name = name.strip().casefold()
+        if cleaned_name:
+            column_lookup.setdefault(cleaned_name, index)
 
-    print("\n--- Required Column Check ---")
+    print("\n--- Schema Validation ---")
 
-    for required_name in required_names:
-        normalized_name = required_name.casefold()
+    required_columns = schema.get("required_columns", [])
 
-        if normalized_name not in column_lookup:
-            print(f"- Column '{required_name}' is missing from the CSV header.")
-            continue
+    if not isinstance(required_columns, list):
+        print("'required_columns' must be a list.")
+    else:
+        for name in required_columns:
+            if not isinstance(name, str) or not name.strip():
+                print(f"Invalid required column name: {name!r}")
+                continue
 
-        column_index = column_lookup[normalized_name]
-        missing_rows = []
+            key = name.strip().casefold()
 
-        for row_number, row in data_rows:
-            value = row[column_index].strip() if column_index < len(row) else ""
-            if not value:
-                missing_rows.append(row_number)
+            if key not in column_lookup:
+                print(f"- Required column '{name}' is missing from the header.")
+                continue
 
-        if missing_rows:
-            shown_rows = ", ".join(str(number) for number in missing_rows[:10])
-            print(
-                f"- Column '{required_name}' has {len(missing_rows)} "
-                f"missing value(s) in row(s): {shown_rows}"
-            )
-            if len(missing_rows) > 10:
-                print(f"  ...and {len(missing_rows) - 10} more")
-        else:
-            print(f"- Column '{required_name}' exists and has no missing values.")
+            index = column_lookup[key]
+            missing_rows = [
+                row_number
+                for row_number, row in data_rows
+                if index >= len(row) or not row[index].strip()
+            ]
 
+            if missing_rows:
+                print(
+                    f"- '{name}' has {len(missing_rows)} blank value(s); "
+                    f"first affected row: {missing_rows[0]}"
+                )
+            else:
+                print(f"- '{name}' exists and has no blank values.")
 
-def validate_numeric_range(columns, data_rows):
-    if not columns:
-        return
+    date_columns = schema.get("date_columns", {})
 
-    answer = input("\nWould you like to check a numeric range? (y/n): ").strip().lower()
-    if answer != "y":
-        return
+    if not isinstance(date_columns, dict):
+        print("'date_columns' must be an object mapping column names to formats.")
+    else:
+        for name, date_format in date_columns.items():
+            if not isinstance(name, str) or not name.strip():
+                print(f"Invalid date column name: {name!r}")
+                continue
 
-    print("\nChoose the numeric column:")
-    for number, column in enumerate(columns, start=1):
-        print(f"{number}. {column.strip() or f'(unnamed column {number})'}")
+            key = name.strip().casefold()
 
-    try:
-        column_number = int(input("Enter the column number: "))
-    except ValueError:
-        print("Please enter a number.")
-        return
+            if key not in column_lookup:
+                print(f"- Date column '{name}' is missing from the header.")
+                continue
 
-    if not 1 <= column_number <= len(columns):
-        print("That column number is not in the CSV.")
-        return
+            if date_format not in SUPPORTED_DATE_FORMATS:
+                print(
+                    f"- Unsupported date format for '{name}'. "
+                    "Use one of the formats listed in the README."
+                )
+                continue
 
-    try:
-        minimum = float(input("Enter the minimum allowed value: "))
-        maximum = float(input("Enter the maximum allowed value: "))
-    except ValueError:
-        print("Please enter valid numeric limits.")
-        return
+            index = column_lookup[key]
+            invalid_rows = []
 
-    if not math.isfinite(minimum) or not math.isfinite(maximum):
-        print("Range limits must be finite numbers.")
-        return
+            for row_number, row in data_rows:
+                value = row[index].strip() if index < len(row) else ""
+                if not value:
+                    continue
 
-    if minimum > maximum:
-        print("The minimum cannot be greater than the maximum.")
-        return
+                try:
+                    datetime.strptime(value, date_format)
+                except ValueError:
+                    invalid_rows.append((row_number, value))
 
-    column_index = column_number - 1
-    column_name = columns[column_index].strip() or f"Column {column_number}"
-    out_of_range = []
-    invalid_values = []
-    checked_count = 0
+            if invalid_rows:
+                print(f"- '{name}' has {len(invalid_rows)} invalid date value(s):")
+                for row_number, value in invalid_rows[:5]:
+                    print(f"    Row {row_number}: {value!r}")
+                if len(invalid_rows) > 5:
+                    print(f"    ...and {len(invalid_rows) - 5} more")
+            else:
+                print(f"- All non-empty values in '{name}' match the date format.")
 
-    for row_number, row in data_rows:
-        value = row[column_index].strip() if column_index < len(row) else ""
-        if not value:
-            continue
+    numeric_ranges = schema.get("numeric_ranges", {})
 
-        try:
-            number = float(value)
-            if not math.isfinite(number):
-                raise ValueError
-        except ValueError:
-            invalid_values.append((row_number, value))
-            continue
+    if not isinstance(numeric_ranges, dict):
+        print("'numeric_ranges' must be an object.")
+    else:
+        for name, limits in numeric_ranges.items():
+            if not isinstance(name, str) or not name.strip():
+                print(f"Invalid numeric column name: {name!r}")
+                continue
 
-        checked_count += 1
-        if number < minimum or number > maximum:
-            out_of_range.append((row_number, value))
+            key = name.strip().casefold()
 
-    print(f"\nNumeric range check for '{column_name}' ({minimum} to {maximum}):")
-    print(f"Valid numbers checked: {checked_count}")
-    print(f"Values outside the range: {len(out_of_range)}")
-    print(f"Non-numeric values skipped: {len(invalid_values)}")
+            if key not in column_lookup:
+                print(f"- Numeric column '{name}' is missing from the header.")
+                continue
 
-    for row_number, value in out_of_range[:10]:
-        print(f"- Row {row_number}: {value!r} is outside the range")
-    if len(out_of_range) > 10:
-        print(f"- ...and {len(out_of_range) - 10} more")
+            if not isinstance(limits, dict):
+                print(f"- Range for '{name}' must contain min and max values.")
+                continue
 
-    for row_number, value in invalid_values[:10]:
-        print(f"- Row {row_number}: {value!r} is not numeric")
-    if len(invalid_values) > 10:
-        print(f"- ...and {len(invalid_values) - 10} more")
+            try:
+                minimum = float(limits["min"])
+                maximum = float(limits["max"])
+            except (KeyError, TypeError, ValueError):
+                print(f"- Range for '{name}' needs numeric 'min' and 'max'.")
+                continue
+
+            if not math.isfinite(minimum) or not math.isfinite(maximum):
+                print(f"- Range limits for '{name}' must be finite numbers.")
+                continue
+
+            if minimum > maximum:
+                print(f"- Minimum for '{name}' cannot exceed its maximum.")
+                continue
+
+            index = column_lookup[key]
+            problems = []
+
+            for row_number, row in data_rows:
+                value = row[index].strip() if index < len(row) else ""
+                if not value:
+                    continue
+
+                try:
+                    number = float(value)
+                    if not math.isfinite(number):
+                        raise ValueError
+                except ValueError:
+                    problems.append((row_number, value, "not numeric"))
+                    continue
+
+                if number < minimum or number > maximum:
+                    problems.append((row_number, value, "outside range"))
+
+            if problems:
+                print(f"- '{name}' has {len(problems)} range issue(s):")
+                for row_number, value, reason in problems[:5]:
+                    print(f"    Row {row_number}: {value!r} ({reason})")
+                if len(problems) > 5:
+                    print(f"    ...and {len(problems) - 5} more")
+            else:
+                print(
+                    f"- All non-empty values in '{name}' are between "
+                    f"{minimum:g} and {maximum:g}."
+                )
 
 
 def main():
@@ -395,9 +399,9 @@ def main():
     if columns is None:
         return
 
-    validate_date_column(columns, data_rows)
-    validate_required_columns(columns, data_rows)
-    validate_numeric_range(columns, data_rows)
+    schema = load_schema()
+    if schema is not None:
+        validate_schema(columns, data_rows, schema)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,10 @@
+{
+  "required_columns": ["name", "email"],
+  "date_columns": {},
+  "numeric_ranges": {
+    "age": {
+      "min": 0,
+      "max": 120
+    }
+  }
+}
