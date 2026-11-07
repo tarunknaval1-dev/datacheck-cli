@@ -12,21 +12,16 @@ DATE_FORMATS = [
     ("DD-MM-YYYY", "%d-%m-%Y"),
     ("YYYY/MM/DD", "%Y/%m/%d"),
 ]
-
-SUPPORTED_DATE_FORMATS = {date_format for _, date_format in DATE_FORMATS}
+SUPPORTED_DATE_FORMATS = {fmt for _, fmt in DATE_FORMATS}
 
 
 def choose_csv_file():
     file_input = input("Enter the path to a CSV file: ").strip().strip("\"'")
-
     if not file_input:
         print("File path cannot be empty.")
         return None
 
     csv_path = Path(file_input).expanduser()
-
-    # If a relative path isn't found from the terminal's folder,
-    # also look beside this Python script.
     if not csv_path.is_absolute() and not csv_path.exists():
         csv_path = Path(__file__).parent / csv_path
 
@@ -34,24 +29,19 @@ def choose_csv_file():
         if not csv_path.exists():
             print(f"File not found: {csv_path}")
             return None
-
         if not csv_path.is_file():
             print("Please enter a file path, not a folder.")
             return None
-
         if csv_path.suffix.lower() != ".csv":
             print("The selected file must have a .csv extension.")
             return None
-
         return csv_path.resolve()
-
     except OSError as error:
         print(f"Could not access that file: {error}")
         return None
 
 
 def classify_value(value):
-    """Estimate whether a non-empty value is a number, date, or text."""
     try:
         number = float(value)
         if math.isfinite(number):
@@ -78,10 +68,8 @@ def classify_value(value):
 def infer_column_type(value_types):
     if not value_types:
         return "empty"
-
     if len(value_types) == 1:
         return next(iter(value_types))
-
     return "mixed"
 
 
@@ -100,59 +88,60 @@ def profile_csv(csv_path):
                 {
                     "non_empty": 0,
                     "missing": 0,
-                    "unique_values": set(),
+                    "unique": set(),
+                    "types": set(),
                     "whitespace_count": 0,
                     "whitespace_examples": [],
-                    "value_types": set(),
                     "text_count": 0,
-                    "text_examples": []
+                    "text_examples": [],
                 }
                 for _ in columns
             ]
 
+            data_rows = []
             seen_rows = {}
             duplicate_examples = []
-            data_rows = []
+            malformed_rows = []
             row_count = 0
 
             for row_number, row in enumerate(reader, start=2):
-                # Ignore completely blank lines.
                 if not row or all(not value.strip() for value in row):
                     continue
 
                 row_count += 1
                 data_rows.append((row_number, row))
 
+                if len(row) != len(columns):
+                    malformed_rows.append((row_number, len(row)))
+
                 for index in range(len(columns)):
                     value = row[index] if index < len(row) else ""
-                    cleaned_value = value.strip()
+                    cleaned = value.strip()
                     stats = column_stats[index]
 
-                    if value != cleaned_value:
+                    if value != cleaned:
                         stats["whitespace_count"] += 1
                         if len(stats["whitespace_examples"]) < 3:
                             stats["whitespace_examples"].append(
                                 (row_number, value)
                             )
 
-                    if cleaned_value:
+                    if cleaned:
                         stats["non_empty"] += 1
-                        stats["unique_values"].add(cleaned_value)
-
-                        value_type = classify_value(cleaned_value)
-                        stats["value_types"].add(value_type)
+                        stats["unique"].add(cleaned)
+                        value_type = classify_value(cleaned)
+                        stats["types"].add(value_type)
 
                         if value_type == "text":
                             stats["text_count"] += 1
                             if len(stats["text_examples"]) < 5:
                                 stats["text_examples"].append(
-                                    (row_number, cleaned_value)
+                                    (row_number, cleaned)
                                 )
                     else:
                         stats["missing"] += 1
 
                 normalized_row = tuple(value.strip() for value in row)
-
                 if normalized_row in seen_rows:
                     duplicate_examples.append(
                         (seen_rows[normalized_row], row_number)
@@ -170,46 +159,45 @@ def profile_csv(csv_path):
     print("\nColumn details:")
 
     for index, column in enumerate(columns):
-        display_name = column.strip() or f"(unnamed column {index + 1})"
+        name = column.strip() or f"(unnamed column {index + 1})"
         stats = column_stats[index]
         missing_percent = stats["missing"] / row_count * 100 if row_count else 0
-        estimated_type = infer_column_type(stats["value_types"])
 
         print(
-            f"- {display_name}: "
-            f"type={estimated_type}, "
+            f"- {name}: "
+            f"type={infer_column_type(stats['types'])}, "
             f"{stats['non_empty']} non-empty, "
             f"{stats['missing']} missing ({missing_percent:.1f}%), "
-            f"{len(stats['unique_values'])} distinct, "
+            f"{len(stats['unique'])} distinct, "
             f"{stats['whitespace_count']} whitespace issue(s)"
         )
 
-        for issue_row, original_value in stats["whitespace_examples"]:
-            print(f"    Whitespace at row {issue_row}: {original_value!r}")
+        for issue_row, value in stats["whitespace_examples"]:
+            print(f"    Whitespace at row {issue_row}: {value!r}")
 
-        value_types = stats["value_types"]
-        if (
-            "number" in value_types
-            and "text" in value_types
-            and "date" not in value_types
-        ):
+        types = stats["types"]
+        if "number" in types and "text" in types and "date" not in types:
             print(f"    Possible invalid numeric values: {stats['text_count']}")
             for issue_row, value in stats["text_examples"]:
                 print(f"      Row {issue_row}: {value!r}")
-
-            extra_count = stats["text_count"] - len(stats["text_examples"])
-            if extra_count:
-                print(f"      ...and {extra_count} more")
+            extra = stats["text_count"] - len(stats["text_examples"])
+            if extra:
+                print(f"      ...and {extra} more")
 
     print(f"\nDuplicate rows: {len(duplicate_examples)}")
+    for first_row, repeated_row in duplicate_examples[:5]:
+        print(f"- Row {first_row} repeats row {repeated_row}")
+    if len(duplicate_examples) > 5:
+        print(f"- ...and {len(duplicate_examples) - 5} more")
 
-    if duplicate_examples:
-        print("Repeated row examples (first occurrence → repeated occurrence):")
-        for first_row, repeated_row in duplicate_examples[:5]:
-            print(f"- Row {first_row} → row {repeated_row}")
-
-        if len(duplicate_examples) > 5:
-            print(f"- ...and {len(duplicate_examples) - 5} more")
+    print(f"\nRows with the wrong number of fields: {len(malformed_rows)}")
+    for row_number, field_count in malformed_rows[:5]:
+        print(
+            f"- Row {row_number}: expected {len(columns)} fields, "
+            f"found {field_count}"
+        )
+    if len(malformed_rows) > 5:
+        print(f"- ...and {len(malformed_rows) - 5} more")
 
     return columns, data_rows
 
@@ -236,7 +224,6 @@ def load_schema():
 
 def validate_schema(columns, data_rows, schema):
     column_lookup = {}
-
     for index, name in enumerate(columns):
         cleaned_name = name.strip().casefold()
         if cleaned_name:
@@ -244,41 +231,38 @@ def validate_schema(columns, data_rows, schema):
 
     print("\n--- Schema Validation ---")
 
-    required_columns = schema.get("required_columns", [])
-
-    if not isinstance(required_columns, list):
+    required = schema.get("required_columns", [])
+    if not isinstance(required, list):
         print("'required_columns' must be a list.")
     else:
-        for name in required_columns:
+        for name in required:
             if not isinstance(name, str) or not name.strip():
                 print(f"Invalid required column name: {name!r}")
                 continue
 
             key = name.strip().casefold()
-
             if key not in column_lookup:
                 print(f"- Required column '{name}' is missing from the header.")
                 continue
 
             index = column_lookup[key]
-            missing_rows = [
+            missing = [
                 row_number
                 for row_number, row in data_rows
                 if index >= len(row) or not row[index].strip()
             ]
 
-            if missing_rows:
+            if missing:
                 print(
-                    f"- '{name}' has {len(missing_rows)} blank value(s); "
-                    f"first affected row: {missing_rows[0]}"
+                    f"- '{name}' has {len(missing)} blank value(s); "
+                    f"first affected row: {missing[0]}"
                 )
             else:
                 print(f"- '{name}' exists and has no blank values.")
 
     date_columns = schema.get("date_columns", {})
-
     if not isinstance(date_columns, dict):
-        print("'date_columns' must be an object mapping column names to formats.")
+        print("'date_columns' must be an object.")
     else:
         for name, date_format in date_columns.items():
             if not isinstance(name, str) or not name.strip():
@@ -286,42 +270,37 @@ def validate_schema(columns, data_rows, schema):
                 continue
 
             key = name.strip().casefold()
-
             if key not in column_lookup:
                 print(f"- Date column '{name}' is missing from the header.")
                 continue
 
             if date_format not in SUPPORTED_DATE_FORMATS:
-                print(
-                    f"- Unsupported date format for '{name}'. "
-                    "Use one of the formats listed in the README."
-                )
+                print(f"- Unsupported date format for '{name}': {date_format!r}")
+                print(f"  Choose one of: {', '.join(sorted(SUPPORTED_DATE_FORMATS))}")
                 continue
 
             index = column_lookup[key]
-            invalid_rows = []
+            invalid = []
 
             for row_number, row in data_rows:
                 value = row[index].strip() if index < len(row) else ""
                 if not value:
                     continue
-
                 try:
                     datetime.strptime(value, date_format)
                 except ValueError:
-                    invalid_rows.append((row_number, value))
+                    invalid.append((row_number, value))
 
-            if invalid_rows:
-                print(f"- '{name}' has {len(invalid_rows)} invalid date value(s):")
-                for row_number, value in invalid_rows[:5]:
+            if invalid:
+                print(f"- '{name}' has {len(invalid)} invalid date value(s):")
+                for row_number, value in invalid[:5]:
                     print(f"    Row {row_number}: {value!r}")
-                if len(invalid_rows) > 5:
-                    print(f"    ...and {len(invalid_rows) - 5} more")
+                if len(invalid) > 5:
+                    print(f"    ...and {len(invalid) - 5} more")
             else:
                 print(f"- All non-empty values in '{name}' match the date format.")
 
     numeric_ranges = schema.get("numeric_ranges", {})
-
     if not isinstance(numeric_ranges, dict):
         print("'numeric_ranges' must be an object.")
     else:
@@ -331,7 +310,6 @@ def validate_schema(columns, data_rows, schema):
                 continue
 
             key = name.strip().casefold()
-
             if key not in column_lookup:
                 print(f"- Numeric column '{name}' is missing from the header.")
                 continue
@@ -347,12 +325,12 @@ def validate_schema(columns, data_rows, schema):
                 print(f"- Range for '{name}' needs numeric 'min' and 'max'.")
                 continue
 
-            if not math.isfinite(minimum) or not math.isfinite(maximum):
-                print(f"- Range limits for '{name}' must be finite numbers.")
-                continue
-
-            if minimum > maximum:
-                print(f"- Minimum for '{name}' cannot exceed its maximum.")
+            if (
+                not math.isfinite(minimum)
+                or not math.isfinite(maximum)
+                or minimum > maximum
+            ):
+                print(f"- Range limits for '{name}' are invalid.")
                 continue
 
             index = column_lookup[key]
