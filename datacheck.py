@@ -199,6 +199,37 @@ def profile_csv(csv_path):
     if len(malformed_rows) > 5:
         print(f"- ...and {len(malformed_rows) - 5} more")
 
+        missing_total = sum(stats["missing"] for stats in column_stats)
+    whitespace_total = sum(stats["whitespace_count"] for stats in column_stats)
+
+    possible_numeric_total = sum(
+        stats["text_count"]
+        for stats in column_stats
+        if "number" in stats["types"]
+        and "text" in stats["types"]
+        and "date" not in stats["types"]
+    )
+
+    profile_issues = (
+        missing_total
+        + whitespace_total
+        + possible_numeric_total
+        + len(duplicate_examples)
+        + len(malformed_rows)
+    )
+
+    print("\n--- Profile Summary ---")
+    print(f"Missing values: {missing_total}")
+    print(f"Whitespace issues: {whitespace_total}")
+    print(f"Possible invalid numbers: {possible_numeric_total}")
+    print(f"Duplicate rows: {len(duplicate_examples)}")
+    print(f"Rows with incorrect field counts: {len(malformed_rows)}")
+
+    if profile_issues:
+        print(f"Status: REVIEW — {profile_issues} profile issue(s) found.")
+    else:
+        print("Status: PASS — no profile issues found.")
+
     return columns, data_rows
 
 
