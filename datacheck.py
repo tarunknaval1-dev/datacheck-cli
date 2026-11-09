@@ -1,7 +1,9 @@
 import csv
 import json
 import math
+from contextlib import redirect_stdout
 from datetime import date, datetime
+from io import StringIO
 from pathlib import Path
 
 
@@ -12,7 +14,7 @@ DATE_FORMATS = [
     ("DD-MM-YYYY", "%d-%m-%Y"),
     ("YYYY/MM/DD", "%Y/%m/%d"),
 ]
-SUPPORTED_DATE_FORMATS = {fmt for _, fmt in DATE_FORMATS}
+SUPPORTED_DATE_FORMATS = {date_format for _, date_format in DATE_FORMATS}
 
 
 def choose_csv_file():
@@ -186,7 +188,7 @@ def profile_csv(csv_path):
 
     print(f"\nDuplicate rows: {len(duplicate_examples)}")
     for first_row, repeated_row in duplicate_examples[:5]:
-        print(f"- Row {first_row} repeats row {repeated_row}")
+        print(f"- Row {repeated_row} repeats row {first_row}")
     if len(duplicate_examples) > 5:
         print(f"- ...and {len(duplicate_examples) - 5} more")
 
@@ -199,9 +201,8 @@ def profile_csv(csv_path):
     if len(malformed_rows) > 5:
         print(f"- ...and {len(malformed_rows) - 5} more")
 
-        missing_total = sum(stats["missing"] for stats in column_stats)
+    missing_total = sum(stats["missing"] for stats in column_stats)
     whitespace_total = sum(stats["whitespace_count"] for stats in column_stats)
-
     possible_numeric_total = sum(
         stats["text_count"]
         for stats in column_stats
@@ -209,8 +210,7 @@ def profile_csv(csv_path):
         and "text" in stats["types"]
         and "date" not in stats["types"]
     )
-
-    profile_issues = (
+    issue_total = (
         missing_total
         + whitespace_total
         + possible_numeric_total
@@ -225,8 +225,8 @@ def profile_csv(csv_path):
     print(f"Duplicate rows: {len(duplicate_examples)}")
     print(f"Rows with incorrect field counts: {len(malformed_rows)}")
 
-    if profile_issues:
-        print(f"Status: REVIEW — {profile_issues} profile issue(s) found.")
+    if issue_total:
+        print(f"Status: REVIEW — {issue_total} profile issue(s) found.")
     else:
         print("Status: PASS — no profile issues found.")
 
@@ -278,8 +278,7 @@ def validate_schema(columns, data_rows, schema):
 
             index = column_lookup[key]
             missing = [
-                row_number
-                for row_number, row in data_rows
+                row_number for row_number, row in data_rows
                 if index >= len(row) or not row[index].strip()
             ]
 
@@ -396,6 +395,27 @@ def validate_schema(columns, data_rows, schema):
                 )
 
 
+def save_markdown_report(csv_path, analysis_text):
+    report_path = Path(__file__).with_name("datacheck_report.md")
+    generated_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    report = (
+        "# DataCheck Report\n\n"
+        f"- **CSV file:** `{csv_path.name}`\n"
+        f"- **Generated:** {generated_time}\n\n"
+        "## Analysis Results\n\n"
+        "```text\n"
+        f"{analysis_text.rstrip()}\n"
+        "```\n"
+    )
+
+    try:
+        report_path.write_text(report, encoding="utf-8")
+        print(f"\nMarkdown report saved to: {report_path}")
+    except OSError as error:
+        print(f"\nCould not save the Markdown report: {error}")
+
+
 def main():
     print("--- DataCheck ---")
     print("Profile a CSV file and check its data quality.\n")
@@ -404,13 +424,21 @@ def main():
     if not csv_path:
         return
 
-    columns, data_rows = profile_csv(csv_path)
-    if columns is None:
-        return
+    output = StringIO()
 
-    schema = load_schema()
-    if schema is not None:
-        validate_schema(columns, data_rows, schema)
+    with redirect_stdout(output):
+        columns, data_rows = profile_csv(csv_path)
+
+        if columns is not None:
+            schema = load_schema()
+            if schema is not None:
+                validate_schema(columns, data_rows, schema)
+
+    analysis_text = output.getvalue()
+    print(analysis_text, end="")
+
+    if columns is not None:
+        save_markdown_report(csv_path, analysis_text)
 
 
 if __name__ == "__main__":
