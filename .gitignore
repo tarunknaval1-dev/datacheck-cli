@@ -2,3 +2,4 @@ __pycache__/
 *.py[cod]
 .venv/
 datacheck_report.md
+datacheck_report.json

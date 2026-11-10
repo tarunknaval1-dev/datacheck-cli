@@ -1,3 +1,4 @@
+import re
 import csv
 import json
 import math
@@ -415,6 +416,24 @@ def save_markdown_report(csv_path, analysis_text):
     except OSError as error:
         print(f"\nCould not save the Markdown report: {error}")
 
+def save_json_report(csv_path, analysis_text):
+    report_path = Path(__file__).with_name("datacheck_report.json")
+
+    report = {
+        "csv_file": csv_path.name,
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "analysis_lines": analysis_text.splitlines()
+    }
+
+    try:
+        report_path.write_text(
+            json.dumps(report, indent=2),
+            encoding="utf-8"
+        )
+        print(f"JSON report saved to: {report_path}")
+    except OSError as error:
+        print(f"Could not save the JSON report: {error}")
+
 
 def main():
     print("--- DataCheck ---")
@@ -438,7 +457,8 @@ def main():
     print(analysis_text, end="")
 
     if columns is not None:
-        save_markdown_report(csv_path, analysis_text)
+         save_markdown_report(csv_path, analysis_text)
+         save_json_report(csv_path, analysis_text)
 
 
 if __name__ == "__main__":
