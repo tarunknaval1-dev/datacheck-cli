@@ -1,4 +1,4 @@
-import re
+import argparse
 import csv
 import json
 import math
@@ -16,17 +16,61 @@ DATE_FORMATS = [
     ("YYYY/MM/DD", "%Y/%m/%d"),
 ]
 SUPPORTED_DATE_FORMATS = {date_format for _, date_format in DATE_FORMATS}
+PROJECT_FOLDER = Path(__file__).parent
 
 
-def choose_csv_file():
-    file_input = input("Enter the path to a CSV file: ").strip().strip("\"'")
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description="Profile a CSV file and check its data quality."
+    )
+    parser.add_argument(
+        "csv_file",
+        nargs="?",
+        help="CSV file to inspect. If omitted, DataCheck prompts for a path."
+    )
+    parser.add_argument(
+        "--schema",
+        help="JSON schema path. Defaults to schema.json beside this script."
+    )
+    parser.add_argument(
+        "--no-schema",
+        action="store_true",
+        help="Skip schema validation."
+    )
+    parser.add_argument(
+        "--markdown-report",
+        default=str(PROJECT_FOLDER / "datacheck_report.md"),
+        help="Markdown report output path."
+    )
+    parser.add_argument(
+        "--json-report",
+        default=str(PROJECT_FOLDER / "datacheck_report.json"),
+        help="JSON report output path."
+    )
+    parser.add_argument(
+        "--no-reports",
+        action="store_true",
+        help="Display results without writing report files."
+    )
+    return parser.parse_args()
+
+
+def choose_csv_file(file_input=None):
+    if file_input is None:
+        file_input = input("Enter the path to a CSV file: ").strip()
+    else:
+        file_input = str(file_input).strip()
+
+    file_input = file_input.strip("\"'")
+
     if not file_input:
         print("File path cannot be empty.")
         return None
 
     csv_path = Path(file_input).expanduser()
+
     if not csv_path.is_absolute() and not csv_path.exists():
-        csv_path = Path(__file__).parent / csv_path
+        csv_path = PROJECT_FOLDER / csv_path
 
     try:
         if not csv_path.exists():
@@ -234,21 +278,24 @@ def profile_csv(csv_path):
     return columns, data_rows
 
 
-def load_schema():
-    schema_path = Path(__file__).with_name("schema.json")
+def load_schema(schema_path=None):
+    if schema_path is None:
+        schema_path = PROJECT_FOLDER / "schema.json"
+    else:
+        schema_path = Path(schema_path).expanduser()
 
     try:
         with schema_path.open("r", encoding="utf-8") as file:
             schema = json.load(file)
     except FileNotFoundError:
-        print("\nschema.json was not found. Schema checks skipped.")
+        print(f"\nSchema file not found: {schema_path}")
         return None
     except (OSError, json.JSONDecodeError) as error:
-        print(f"\nCould not read schema.json: {error}")
+        print(f"\nCould not read the schema file: {error}")
         return None
 
     if not isinstance(schema, dict):
-        print("schema.json must contain a JSON object.")
+        print("The schema file must contain a JSON object.")
         return None
 
     return schema
@@ -307,7 +354,10 @@ def validate_schema(columns, data_rows, schema):
 
             if date_format not in SUPPORTED_DATE_FORMATS:
                 print(f"- Unsupported date format for '{name}': {date_format!r}")
-                print(f"  Choose one of: {', '.join(sorted(SUPPORTED_DATE_FORMATS))}")
+                print(
+                    "  Supported formats: "
+                    + ", ".join(sorted(SUPPORTED_DATE_FORMATS))
+                )
                 continue
 
             index = column_lookup[key]
@@ -396,8 +446,8 @@ def validate_schema(columns, data_rows, schema):
                 )
 
 
-def save_markdown_report(csv_path, analysis_text):
-    report_path = Path(__file__).with_name("datacheck_report.md")
+def save_markdown_report(csv_path, analysis_text, report_path):
+    report_path = Path(report_path).expanduser()
     generated_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     report = (
@@ -411,21 +461,24 @@ def save_markdown_report(csv_path, analysis_text):
     )
 
     try:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(report, encoding="utf-8")
-        print(f"\nMarkdown report saved to: {report_path}")
+        print(f"Markdown report saved to: {report_path}")
     except OSError as error:
-        print(f"\nCould not save the Markdown report: {error}")
+        print(f"Could not save the Markdown report: {error}")
 
-def save_json_report(csv_path, analysis_text):
-    report_path = Path(__file__).with_name("datacheck_report.json")
+
+def save_json_report(csv_path, analysis_text, report_path):
+    report_path = Path(report_path).expanduser()
 
     report = {
         "csv_file": csv_path.name,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "analysis_lines": analysis_text.splitlines()
+        "analysis_lines": analysis_text.splitlines(),
     }
 
     try:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(
             json.dumps(report, indent=2),
             encoding="utf-8"
@@ -436,10 +489,10 @@ def save_json_report(csv_path, analysis_text):
 
 
 def main():
-    print("--- DataCheck ---")
-    print("Profile a CSV file and check its data quality.\n")
+    args = parse_arguments()
 
-    csv_path = choose_csv_file()
+    print("--- DataCheck ---")
+    csv_path = choose_csv_file(args.csv_file)
     if not csv_path:
         return
 
@@ -448,17 +501,25 @@ def main():
     with redirect_stdout(output):
         columns, data_rows = profile_csv(csv_path)
 
-        if columns is not None:
-            schema = load_schema()
+        if columns is not None and not args.no_schema:
+            schema = load_schema(args.schema)
             if schema is not None:
                 validate_schema(columns, data_rows, schema)
 
     analysis_text = output.getvalue()
     print(analysis_text, end="")
 
-    if columns is not None:
-         save_markdown_report(csv_path, analysis_text)
-         save_json_report(csv_path, analysis_text)
+    if columns is not None and not args.no_reports:
+        save_markdown_report(
+            csv_path,
+            analysis_text,
+            args.markdown_report
+        )
+        save_json_report(
+            csv_path,
+            analysis_text,
+            args.json_report
+        )
 
 
 if __name__ == "__main__":
