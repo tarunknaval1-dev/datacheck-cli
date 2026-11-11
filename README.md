@@ -67,6 +67,10 @@ DataCheck is a Python command-line project for checking CSV data quality.
 
 - Export analysis results to JSON
 
+# Day 17
+
+- Accept a CSV path and report options from command-line arguments
+
 ## Run the app
 
 Requires Python 3.
