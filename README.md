@@ -1,86 +1,125 @@
 # DataCheck
 
-DataCheck is a Python command-line project for checking CSV data quality.
+DataCheck is a Python command-line tool that profiles CSV files, checks data quality, and saves analysis reports.
 
-## Day 1
+## Features
 
-- Ask for a CSV file path
-- Check that the file exists and is a CSV file
+- Show CSV row and column counts
+- Summarize each column’s estimated type, missing values, and distinct values
+- Detect duplicate rows and rows with incorrect field counts
+- Flag leading or trailing whitespace
+- Flag possible non-numeric values in mixed columns
+- Validate required columns, date formats, and numeric ranges using a JSON schema
+- Export analysis results to Markdown and JSON
+- Run automated tests with Python’s built-in `unittest`
 
-## Day 2
+## Requirements
 
-- Display CSV column names and data row count
+- Python 3
+- No external packages required
 
-## Day 3
+## Project structure
 
-- Show non-empty and distinct value counts for each column
+```text
+datacheck-cli/
+├── datacheck.py
+├── schema.json
+├── sample_data.csv
+├── tests/
+│   └── test_datacheck.py
+├── .gitignore
+└── README.md
+```
 
-## Day 4
+The app creates `datacheck_report.md` and `datacheck_report.json` when it runs. These generated reports are ignored by Git because they may contain values from the CSV being analyzed.
 
-- Report missing values and their percentage for each column
+## Run DataCheck
 
-## Day 5
+Open a terminal in the project folder.
 
-- Detect repeated duplicate rows and show their row numbers
+Analyze the included sample:
 
-## Day 6
+```powershell
+python datacheck.py sample_data.csv
+```
 
-- Detect leading or trailing whitespace in values
+You can also start the program without a filename and enter one when prompted:
 
-## Day 7
+```powershell
+python datacheck.py
+```
 
-- Estimate whether each column contains text, numbers, dates, mixed values, or no values
+Use `--help` to see all options:
 
-# Day 8
+```powershell
+python datacheck.py --help
+```
 
-- Flag possible non-numeric values in columns containing numbers
+## Command-line options
 
-# Day 9
+Use a different schema file:
 
-- Validate date columns against a selected date format
+```powershell
+python datacheck.py sample_data.csv --schema another_schema.json
+```
 
-# Day 10
+Run without schema checks:
 
-- Check that specified columns exist and contain no blank value
+```powershell
+python datacheck.py sample_data.csv --no-schema
+```
 
-# Day 11
+Choose where the reports are saved:
 
-- Check numeric columns against a chosen minimum and maximum
+```powershell
+python datacheck.py sample_data.csv --markdown-report reports\result.md --json-report reports\result.json
+```
 
-# Day 12
+Display results without writing reports:
 
-- Load required-column, date-format, and numeric-range rules from schema.json
+```powershell
+python datacheck.py sample_data.csv --no-reports
+```
 
-# Day 13
+## Configure validation rules
 
-- Detect CSV rows with too many or too few fields
+By default, DataCheck looks for `schema.json` beside `datacheck.py`.
 
-# Day 14
+Example schema:
 
-- Show a summary of profiling issues and an overall pass or review status
+```json
+{
+  "required_columns": ["name", "email"],
+  "date_columns": {
+    "signup_date": "%Y-%m-%d"
+  },
+  "numeric_ranges": {
+    "age": {
+      "min": 0,
+      "max": 120
+    }
+  }
+}
+```
 
-# Day 15
+Column names should match the CSV headers; matching ignores capitalization. Supported date formats are `%Y-%m-%d`, `%d/%m/%Y`, `%m/%d/%Y`, `%d-%m-%Y`, and `%Y/%m/%d`.
 
-- Save profiling and schema-check results as a Markdown report
+## Run the tests
 
-# Day 16
-
-- Export analysis results to JSON
-
-# Day 17
-
-- Accept a CSV path and report options from command-line arguments
-
-# Day 18
-
-## Run Tests
+From the project folder:
 
 ```powershell
 python -m unittest discover -s tests -v
+```
 
-## Run the app
+## Limitations
 
-Requires Python 3.
+- Only CSV files are supported.
+- The estimated column types and possible invalid-number warnings are heuristics; they may need review.
+- Schema validation checks only the rules configured in `schema.json`.
+- Blank values are reported separately and skipped by date and numeric range checks.
+- The generated reports include the analysis output and may contain example values from the CSV.
 
-```bash
-python datacheck.py
+## Author
+
+Tarun kumar naval
